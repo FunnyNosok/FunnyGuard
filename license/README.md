@@ -46,6 +46,9 @@ license/
 - **sealed (v3, см. корневой README)** — `Packer seal` → `sealed.jar` + `seal.key` на сервер;
   `run-server.ps1 -SealKey seal.key` поднимает `/seal` (per-launch `FILE_KEY`, TTL 120с,
   HWID-bind); запуск через корневой `scripts\run-sealed.ps1` (`SealedLauncher`).
+  Важно: для condy-строк loader-рантайм (`CondyStrings` и зависимости из `src/loader`)
+  должен быть на classpath запускаемого процесса — BSM `CondyStrings.bootstrap`
+  вызывается при первом обращении к запечатанной строке и берёт ключ из `PMCH_SEAL`.
 
 ## Демонстрация
 

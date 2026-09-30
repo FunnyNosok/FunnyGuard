@@ -30,7 +30,7 @@ FunnyGuard/
 │   │                          HiddenLoader (defineHiddenClass + зануление буферов, без classData),
 │   │                          EphemeralSession (дочерний лоадер на один вызов: анврап → define → wipe/close),
 │   │                          CondyStrings (BSM-строки на FILE_KEY, кеш Cipher, ключа в пуле нет)
-│   └── packer/               упаковщик (Packer: jarhook + vault + seal + vault-seal)
+│   └── packer/               упаковщик (Packer: jarhook + container + seal + vault-seal + vault)
 ├── jdk/                       патчи кастомного JDK
 │   ├── new-files/            pmchDecrypt.cpp/.hpp (HotSpot, расшифровка классов),
 │   │                          PmchGuard.java (java.base, закалка),
@@ -226,11 +226,25 @@ hash ok/mismatch/missing). Натив (`pmchDecrypt.cpp`, v3)
 аудитории опенсорс-релиза). Дешевые оси диверсификации между билдами (соль, сиды, IV)
 уже случайны на каждую сборку.
 
-## Другие (более слабые) варианты в проекте
+## Статус проверки (живая сборка)
 
-В корне проекта остались предыдущие слои, если понадобится сравнение:
-- `native/` — JVMTI-агент + нативный лаунчер (CNG). Работает на обычной JVM, но агент
-  снимается/детектится.
-- `loader/` + `packer/` (`pack`-режим) — чистый Java `ProtectedClassLoader`. Самый
-  слабый: обходится своим classloader'ом или дампом. FunnyGuard использует из них только
-  `jarhook`-путь.
+Собрано и проверено на OpenJDK 21u + MSVC 2022, Windows x64:
+
+- **Реальный клиент Minecraft 1.20.1** (7436 классов, per-class jarhook) запускается на
+  кастомном JDK: LWJGL/OpenGL/OpenAL поднялись, мир сгенерировался, игрок зашёл в игру.
+  Неверный/пустой `PMCH_PASS` → `Incompatible magic value 1347240776` (=`PMCH`), старта нет.
+- **sealed v3** e2e: класс расшифрован по `kmix = HMAC(FILE_KEY, opaque)`, condy- и
+  `PmchStrings`-строки раскрыты; без `PMCH_SEAL` — не грузится.
+- **Закалка рантайма** (безусловные отказы, не зависят от feature-флагов):
+  `-agentlib:jdwp` / `-javaagent` / `-agentpath` / `-Xrun` → «Agents not supported»;
+  `--patch-module=` / `--upgrade-module-path=` → «Module override not supported»;
+  `-Xshare:dump` → «Shared archive dumping not supported»; `jcmd`-attach →
+  `AttachNotSupportedException`; `-vm-structs` → 0 символов `gHotSpotVMStruct*` в `jvm.dll`.
+
+## Эволюция и что НЕ вошло в репозиторий
+
+FunnyGuard — сильнейший слой (шифрование классов + расшифровка в движке кастомного JDK).
+Более ранние/слабые слои в паблик-репозиторий не включены: чистый Java `ProtectedClassLoader`
+(обходится своим classloader'ом или дампом) и JVMTI-агент + нативный лаунчер (агент
+снимается/детектится). Из них используется только `jarhook`-формат, который здесь читает
+уже сам движок JVM.

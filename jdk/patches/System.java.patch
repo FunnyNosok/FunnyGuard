@@ -1,0 +1,13 @@
+diff --git a/src/java.base/share/classes/java/lang/System.java b/src/java.base/share/classes/java/lang/System.java
+index ac2305f58..1af623bac 100644
+--- a/src/java.base/share/classes/java/lang/System.java
++++ b/src/java.base/share/classes/java/lang/System.java
+@@ -2338,6 +2338,8 @@ public final class System {
+ 
+         // system is fully initialized
+         VM.initLevel(4);
++
++        jdk.internal.misc.PmchGuard.enforce();
+     }
+ 
+     private static void setJavaLangAccess() {

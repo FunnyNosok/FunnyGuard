@@ -1,0 +1,20 @@
+﻿# build outputs
+build/
+**/build/
+*.class
+# packaged / protected artifacts
+*.jar
+*.pcc
+*.key
+# custom JDK checkout & runtime (built separately, see jdk/README.md)
+jdk-src/
+# logs & scratch
+*.log
+verify/
+mc-test/
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+Thumbs.db
+.DS_Store

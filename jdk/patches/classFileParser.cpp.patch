@@ -1,0 +1,39 @@
+diff --git a/src/hotspot/share/classfile/classFileParser.cpp b/src/hotspot/share/classfile/classFileParser.cpp
+index 20de43ad8..c7c447ecf 100644
+--- a/src/hotspot/share/classfile/classFileParser.cpp
++++ b/src/hotspot/share/classfile/classFileParser.cpp
+@@ -24,6 +24,7 @@
+ #include "precompiled.hpp"
+ #include "classfile/classFileParser.hpp"
+ #include "classfile/classFileStream.hpp"
++#include "classfile/pmchDecrypt.hpp"
+ #include "classfile/classLoader.hpp"
+ #include "classfile/classLoaderData.inline.hpp"
+ #include "classfile/classLoadInfo.hpp"
+@@ -5514,6 +5515,26 @@ ClassFileParser::ClassFileParser(ClassFileStream* stream,
+   assert(_class_name != nullptr, "invariant");
+   assert(0 == _access_flags.as_int(), "invariant");
+ 
++  {
++    const unsigned char* pmch_in = stream->buffer();
++    int pmch_in_len = stream->length();
++    unsigned char* pmch_out = nullptr;
++    int pmch_out_len = 0;
++    const char* pmch_name = _class_name != nullptr ? _class_name->as_C_string() : nullptr;
++    if (pmch_try_decrypt(pmch_name, pmch_in, pmch_in_len, &pmch_out, &pmch_out_len)) {
++      u1* pmch_buf = NEW_RESOURCE_ARRAY(u1, pmch_out_len);
++      memcpy(pmch_buf, pmch_out, (size_t) pmch_out_len);
++      pmch_free(pmch_out);
++      ClassFileStream* pmch_stream = new ClassFileStream(pmch_buf,
++                                          pmch_out_len,
++                                          stream->source(),
++                                          stream->need_verify(),
++                                          stream->from_boot_loader_modules_image());
++      stream = pmch_stream;
++      _stream = pmch_stream;
++    }
++  }
++
+   // Figure out whether we can skip format checking (matching classic VM behavior)
+   if (DumpSharedSpaces) {
+     // verify == true means it's a 'remote' class (i.e., non-boot class)

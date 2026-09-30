@@ -1,0 +1,97 @@
+diff --git a/src/hotspot/share/runtime/arguments.cpp b/src/hotspot/share/runtime/arguments.cpp
+index 0076b9f0b..64cfd31f3 100644
+--- a/src/hotspot/share/runtime/arguments.cpp
++++ b/src/hotspot/share/runtime/arguments.cpp
+@@ -2303,16 +2303,15 @@ jint Arguments::parse_each_vm_init_arg(const JavaVMInitArgs* args, bool* patch_m
+           size_t len2 = strlen(pos+1) + 1; // options start after ':'.  Final zero must be copied.
+           options = (char*)memcpy(NEW_C_HEAP_ARRAY(char, len2, mtArguments), pos+1, len2);
+         }
+-#if !INCLUDE_JVMTI
+-        if (strcmp(name, "jdwp") == 0) {
+-          jio_fprintf(defaultStream::error_stream(),
+-            "Debugging agents are not supported in this VM\n");
+-          return JNI_ERR;
+-        }
+-#endif // !INCLUDE_JVMTI
++#if 1 // PMCH: agents always rejected in this VM
++        jio_fprintf(defaultStream::error_stream(),
++          "Agents are not supported in this VM\n");
++        return JNI_ERR;
++#else
+         JvmtiAgentList::add_xrun(name, options, false);
+         FREE_C_HEAP_ARRAY(char, name);
+         FREE_C_HEAP_ARRAY(char, options);
++#endif
+       }
+     } else if (match_option(option, "--add-reads=", &tail)) {
+       if (!create_numbered_module_property("jdk.module.addreads", tail, addreads_count++)) {
+@@ -2343,15 +2342,27 @@ jint Arguments::parse_each_vm_init_arg(const JavaVMInitArgs* args, bool* patch_m
+         return JNI_ENOMEM;
+       }
+     } else if (match_option(option, "--upgrade-module-path=", &tail)) {
++#if 1 // PMCH: module override always rejected in this VM
++      jio_fprintf(defaultStream::error_stream(),
++        "Module override is not supported in this VM\n");
++      return JNI_ERR;
++#else
+       if (!create_module_property("jdk.module.upgrade.path", tail, ExternalProperty)) {
+         return JNI_ENOMEM;
+       }
++#endif
+     } else if (match_option(option, "--patch-module=", &tail)) {
++#if 1 // PMCH: module override always rejected in this VM
++      jio_fprintf(defaultStream::error_stream(),
++        "Module override is not supported in this VM\n");
++      return JNI_ERR;
++#else
+       // --patch-module=<module>=<file>(<pathsep><file>)*
+       int res = process_patch_mod_option(tail, patch_mod_javabase);
+       if (res != JNI_OK) {
+         return res;
+       }
++#endif
+     } else if (match_option(option, "--illegal-access=", &tail)) {
+       char version[256];
+       JDK_Version::jdk(17).to_string(version, sizeof(version));
+@@ -2375,20 +2386,19 @@ jint Arguments::parse_each_vm_init_arg(const JavaVMInitArgs* args, bool* patch_m
+         if(pos != nullptr) {
+           options = os::strdup_check_oom(pos + 1, mtArguments);
+         }
+-#if !INCLUDE_JVMTI
+-        if (valid_jdwp_agent(name, is_absolute_path)) {
+-          jio_fprintf(defaultStream::error_stream(),
+-            "Debugging agents are not supported in this VM\n");
+-          return JNI_ERR;
+-        }
+-#endif // !INCLUDE_JVMTI
++#if 1 // PMCH: agents always rejected in this VM
++        jio_fprintf(defaultStream::error_stream(),
++          "Agents are not supported in this VM\n");
++        return JNI_ERR;
++#else
+         JvmtiAgentList::add(name, options, is_absolute_path);
+         os::free(name);
+         os::free(options);
++#endif
+       }
+     // -javaagent
+     } else if (match_option(option, "-javaagent:", &tail)) {
+-#if !INCLUDE_JVMTI
++#if 1 // PMCH: instrumentation agents always rejected in this VM
+       jio_fprintf(defaultStream::error_stream(),
+         "Instrumentation agents are not supported in this VM\n");
+       return JNI_ERR;
+@@ -2603,7 +2613,13 @@ jint Arguments::parse_each_vm_init_arg(const JavaVMInitArgs* args, bool* patch_m
+           set_mode_flags(_comp);
+     // -Xshare:dump
+     } else if (match_option(option, "-Xshare:dump")) {
++#if 1 // PMCH: shared archive dumping always rejected in this VM
++      jio_fprintf(defaultStream::error_stream(),
++        "Shared archive dumping is not supported in this VM\n");
++      return JNI_ERR;
++#else
+       DumpSharedSpaces = true;
++#endif
+     // -Xshare:on
+     } else if (match_option(option, "-Xshare:on")) {
+       UseSharedSpaces = true;

@@ -35,26 +35,11 @@ static const unsigned long long PMCH_ITERATIONS = 210000ULL;
 static const int PMCH_DERIVED_BYTES = 64;
 static const int PMCH_AES_KEY_BYTES = 32;
 
-static const unsigned char PART_A[32] = {
-    0x9F, 0x11, 0x4C, 0xA2, 0x03, 0xE8, 0x77, 0x5B,
-    0x2D, 0xC0, 0x64, 0x91, 0xBA, 0x38, 0x0F, 0xD7,
-    0x46, 0xE1, 0x82, 0x59, 0x1C, 0xAF, 0x73, 0x6A,
-    0xD4, 0x08, 0x95, 0x3B, 0xCE, 0x27, 0x50, 0xB9
-};
-
-static const unsigned char PART_B[32] = {
-    0x31, 0x7A, 0xE5, 0x0C, 0x88, 0x4F, 0x1D, 0xC6,
-    0x93, 0x2A, 0xB7, 0x60, 0x05, 0xD9, 0x4E, 0x8B,
-    0x12, 0xF3, 0x6C, 0xA5, 0x39, 0x80, 0xE7, 0x1E,
-    0x57, 0xCB, 0x24, 0x9D, 0x70, 0xB2, 0x4A, 0x03
-};
-
-static const unsigned char PART_C[32] = {
-    0x6D, 0x2C, 0xF1, 0x58, 0x94, 0x0B, 0xA6, 0x3F,
-    0xE2, 0x79, 0x10, 0xCD, 0x66, 0x87, 0x3A, 0xF4,
-    0x5B, 0x0E, 0xD1, 0x28, 0xB5, 0x4C, 0x99, 0x62,
-    0x07, 0xEA, 0x83, 0x3E, 0xC1, 0x74, 0x1F, 0xA8
-};
+// Key material (passphrase + embedded secret) is no longer static here; it is
+// fetched at runtime from the VMProtect-protected nativecore.dll (path in the
+// PMCH_CORE environment variable). Keeps all secret bytes out of jvm.dll.
+typedef int (*sgx_resolve_fn)(char*, int);
+typedef int (*sgx_secret_fn)(unsigned char*, int);
 
 static const unsigned char PMCH_SALT[16] = {
     0x4A, 0x1C, 0xF7, 0x82, 0x30, 0x6B, 0xD5, 0x9E,
@@ -297,30 +282,49 @@ struct PmchKeyHolder {
         ok = false;
         memset(key, 0, sizeof(key));
 
-        char passphrase[512];
-        DWORD passLen = GetEnvironmentVariableA("PMCH_PASS", passphrase, sizeof(passphrase));
-        if (passLen == 0 || passLen >= sizeof(passphrase)) {
+        char corePath[1024];
+        DWORD coreLen = GetEnvironmentVariableA("PMCH_CORE", corePath, sizeof(corePath));
+        if (coreLen == 0 || coreLen >= sizeof(corePath)) {
+            return;
+        }
+        HMODULE core = LoadLibraryA(corePath);
+        if (core == nullptr) {
+            return;
+        }
+        sgx_resolve_fn resolveFn = (sgx_resolve_fn) GetProcAddress(core, "sgx_resolve");
+        sgx_secret_fn secretFn = (sgx_secret_fn) GetProcAddress(core, "sgx_secret");
+        if (resolveFn == nullptr || secretFn == nullptr) {
+            FreeLibrary(core);
             return;
         }
 
+        char passphrase[512];
+        int passLen = resolveFn(passphrase, (int) sizeof(passphrase));
         unsigned char secret[32];
-        for (int i = 0; i < 32; i++) {
-            secret[i] = PART_A[i] ^ PART_B[i] ^ PART_C[i];
+        int secretLen = secretFn(secret, (int) sizeof(secret));
+        FreeLibrary(core);
+        if (passLen <= 0 || passLen >= (int) sizeof(passphrase) || secretLen != 32) {
+            SecureZeroMemory(passphrase, sizeof(passphrase));
+            SecureZeroMemory(secret, sizeof(secret));
+            return;
         }
 
         char b64[64];
         int b64Len = pmch_base64(secret, 32, b64, sizeof(b64));
         SecureZeroMemory(secret, sizeof(secret));
         if (b64Len == 0) {
+            SecureZeroMemory(passphrase, sizeof(passphrase));
             return;
         }
 
-        int materialLen = (int) passLen + b64Len;
+        int materialLen = passLen + b64Len;
         unsigned char* material = (unsigned char*) malloc((size_t) materialLen);
         if (material == nullptr) {
+            SecureZeroMemory(passphrase, sizeof(passphrase));
+            SecureZeroMemory(b64, sizeof(b64));
             return;
         }
-        memcpy(material, passphrase, passLen);
+        memcpy(material, passphrase, (size_t) passLen);
         memcpy(material + passLen, b64, (size_t) b64Len);
         SecureZeroMemory(passphrase, sizeof(passphrase));
         SecureZeroMemory(b64, sizeof(b64));
@@ -524,6 +528,12 @@ extern "C" void pmch_free(unsigned char* p) {
     }
 }
 
+extern "C" void pmch_wipe(unsigned char* p, int len) {
+    if (p != nullptr && len > 0) {
+        SecureZeroMemory(p, (size_t) len);
+    }
+}
+
 #else
 
 extern "C" bool pmch_try_decrypt(const char*, const unsigned char*, int, unsigned char**, int*) {
@@ -531,6 +541,15 @@ extern "C" bool pmch_try_decrypt(const char*, const unsigned char*, int, unsigne
 }
 
 extern "C" void pmch_free(unsigned char*) {
+}
+
+extern "C" void pmch_wipe(unsigned char* p, int len) {
+    volatile unsigned char* v = (volatile unsigned char*) p;
+    if (v != nullptr) {
+        for (int i = 0; i < len; i++) {
+            v[i] = 0;
+        }
+    }
 }
 
 #endif

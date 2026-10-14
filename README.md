@@ -15,8 +15,17 @@
 2. **Кастомный JDK** (`jdk/`) — пропатченный OpenJDK, который расшифровывает эти классы
    в движке при загрузке. Клиент запускается только на нём (или на bundled-рантайме из него).
 
-Оба используют один ключ: `secret = (три вшитые части XOR)` + твой **пароль**, через
-PBKDF2-HmacSHA256. Пароль движку передаётся при запуске через переменную `PMCH_PASS`.
+Оба используют один ключ: `master = PBKDF2-HmacSHA256(пароль || base64(secret))`. Пароль
+передаётся движку через `PMCH_PASS`. А `secret` (32 байта) движок **не хранит в себе** —
+он тянет его в рантайме из `nativecore.dll` (экспорты `sgx_resolve`/`sgx_secret`), путь к
+которой передаётся через `PMCH_CORE`. Смысл: вынести секрет из 14-МБ `jvm.dll` в маленькую
+отдельную dll, которую можно отдельно закалить (VMProtect/Themida) или в будущем заменить
+на выдачу с сервера. Без `nativecore.dll` движок мастер-ключ не соберёт — классы не грузятся.
+
+> Честно: само по себе перекладывание секрета в `nativecore.dll` **не** усиливает защиту,
+> пока dll не прогнана через VMProtect — секрет всё равно на диске. Это задел под обфускацию
+> и под серверную выдачу. Если нужен реально сильный режим без секрета на диске — это
+> **sealed v3** (ключ с сервера per-launch, см. ниже), он строго круче.
 
 ## Карта папки
 
@@ -67,10 +76,12 @@ FunnyGuard/
 powershell -File scripts\protect-jar.ps1 -InJar C:\path\my-client.jar -OutJar C:\path\my-client-hooked.jar -Pass "мой-пароль"
 ```
 
-Запустить защищённый jar на кастомном JDK:
+Собрать `nativecore.dll` (источник секрета) и запустить защищённый jar на кастомном JDK:
 
 ```powershell
-powershell -File scripts\run-protected.ps1 -Jar C:\path\my-client-hooked.jar -Main com.example.Main -Pass "мой-пароль"
+powershell -File nativecore\scripts\build.ps1
+powershell -File scripts\run-protected.ps1 -Jar C:\path\my-client-hooked.jar -Main com.example.Main `
+  -Pass "мой-пароль" -Core nativecore\build\nativecore.dll
 ```
 
 Зашифровать чувствительную строку — команда печатает токен, его вставляешь в код клиента:

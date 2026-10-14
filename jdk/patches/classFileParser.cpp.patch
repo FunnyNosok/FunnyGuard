@@ -1,5 +1,5 @@
 diff --git a/src/hotspot/share/classfile/classFileParser.cpp b/src/hotspot/share/classfile/classFileParser.cpp
-index 20de43ad8..c7c447ecf 100644
+index 20de43ad8..4cca9e04d 100644
 --- a/src/hotspot/share/classfile/classFileParser.cpp
 +++ b/src/hotspot/share/classfile/classFileParser.cpp
 @@ -24,6 +24,7 @@
@@ -10,10 +10,12 @@ index 20de43ad8..c7c447ecf 100644
  #include "classfile/classLoader.hpp"
  #include "classfile/classLoaderData.inline.hpp"
  #include "classfile/classLoadInfo.hpp"
-@@ -5514,6 +5515,26 @@ ClassFileParser::ClassFileParser(ClassFileStream* stream,
+@@ -5514,6 +5515,31 @@ ClassFileParser::ClassFileParser(ClassFileStream* stream,
    assert(_class_name != nullptr, "invariant");
    assert(0 == _access_flags.as_int(), "invariant");
  
++  u1* pmch_plain = nullptr;
++  int pmch_plain_len = 0;
 +  {
 +    const unsigned char* pmch_in = stream->buffer();
 +    int pmch_in_len = stream->length();
@@ -23,6 +25,7 @@ index 20de43ad8..c7c447ecf 100644
 +    if (pmch_try_decrypt(pmch_name, pmch_in, pmch_in_len, &pmch_out, &pmch_out_len)) {
 +      u1* pmch_buf = NEW_RESOURCE_ARRAY(u1, pmch_out_len);
 +      memcpy(pmch_buf, pmch_out, (size_t) pmch_out_len);
++      pmch_wipe(pmch_out, pmch_out_len);
 +      pmch_free(pmch_out);
 +      ClassFileStream* pmch_stream = new ClassFileStream(pmch_buf,
 +                                          pmch_out_len,
@@ -31,9 +34,22 @@ index 20de43ad8..c7c447ecf 100644
 +                                          stream->from_boot_loader_modules_image());
 +      stream = pmch_stream;
 +      _stream = pmch_stream;
++      pmch_plain = pmch_buf;
++      pmch_plain_len = pmch_out_len;
 +    }
 +  }
 +
    // Figure out whether we can skip format checking (matching classic VM behavior)
    if (DumpSharedSpaces) {
      // verify == true means it's a 'remote' class (i.e., non-boot class)
+@@ -5537,6 +5563,10 @@ ClassFileParser::ClassFileParser(ClassFileStream* stream,
+   parse_stream(stream, CHECK);
+ 
+   post_process_parsed_stream(stream, _cp, CHECK);
++
++  if (pmch_plain != nullptr) {
++    pmch_wipe(pmch_plain, pmch_plain_len);
++  }
+ }
+ 
+ void ClassFileParser::clear_class_metadata() {

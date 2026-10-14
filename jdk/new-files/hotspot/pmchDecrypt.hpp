@@ -7,4 +7,6 @@ extern "C" bool pmch_try_decrypt(const char* class_name,
 
 extern "C" void pmch_free(unsigned char* p);
 
+extern "C" void pmch_wipe(unsigned char* p, int len);
+
 #endif

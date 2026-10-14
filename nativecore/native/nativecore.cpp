@@ -1,4 +1,4 @@
-#include <jni.h>
+﻿#include <jni.h>
 #include <windows.h>
 #include <bcrypt.h>
 #include <winternl.h>
@@ -138,6 +138,68 @@ static bool detect_debugger() {
 // jvm.dll derives the jarhook master key as PBKDF2(passphrase || base64(secret)).
 // Keeping the secret bytes here (not in jvm.dll) lets this small DLL be hardened
 // (VMProtect/Themida) independently of the 14 MB VM.
+//
+// Integrity gate: before handing out the secret, we SHA-256 the jvm.dll that is
+// actually loaded in this process and compare it to the hash of the build we
+// shipped. A swapped (vanilla) or patched (class-dumping) jvm.dll changes the
+// hash -> no secret -> classes never decrypt. So tampering with the VM is the
+// FIRST barrier, not a bypass. Keep EXPECTED_JVM_SHA256 in sync via
+// scripts\set-jvm-hash.ps1 after every jvm.dll rebuild, and harden this DLL
+// (VMProtect) so the check itself cannot be trivially NOP'd.
+
+static const unsigned char EXPECTED_JVM_SHA256[32] = {
+    0x09, 0xCC, 0x6D, 0xC0, 0x5C, 0x01, 0xB4, 0x75,
+    0x72, 0xC0, 0x57, 0xC3, 0x27, 0x85, 0x08, 0x25,
+    0x47, 0xEB, 0x94, 0xF9, 0x5E, 0xF1, 0x6A, 0x1B,
+    0x51, 0xF8, 0xAD, 0xE1, 0xA2, 0x35, 0x4A, 0x5C
+};
+
+static bool sha256_file(const char* path, unsigned char out32[32]) {
+    HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, nullptr,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    BCRYPT_ALG_HANDLE hAlg = nullptr;
+    BCRYPT_HASH_HANDLE hHash = nullptr;
+    bool ok = false;
+    if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) == STATUS_SUCCESS &&
+        BCryptCreateHash(hAlg, &hHash, nullptr, 0, nullptr, 0, 0) == STATUS_SUCCESS) {
+        unsigned char buf[65536];
+        DWORD rd = 0;
+        ok = true;
+        while (ReadFile(h, buf, sizeof(buf), &rd, nullptr) && rd > 0) {
+            if (BCryptHashData(hHash, buf, rd, 0) != STATUS_SUCCESS) { ok = false; break; }
+        }
+        SecureZeroMemory(buf, sizeof(buf));
+        if (ok && BCryptFinishHash(hHash, out32, 32, 0) != STATUS_SUCCESS) {
+            ok = false;
+        }
+    }
+    if (hHash != nullptr) BCryptDestroyHash(hHash);
+    if (hAlg != nullptr) BCryptCloseAlgorithmProvider(hAlg, 0);
+    CloseHandle(h);
+    return ok;
+}
+
+static bool verify_jvm() {
+    HMODULE jvm = GetModuleHandleA("jvm.dll");
+    if (jvm == nullptr) {
+        return false;
+    }
+    char path[1024];
+    DWORD n = GetModuleFileNameA(jvm, path, sizeof(path));
+    if (n == 0 || n >= sizeof(path)) {
+        return false;
+    }
+    unsigned char digest[32];
+    if (!sha256_file(path, digest)) {
+        return false;
+    }
+    bool match = memcmp(digest, EXPECTED_JVM_SHA256, 32) == 0;
+    SecureZeroMemory(digest, sizeof(digest));
+    return match;
+}
 
 extern "C" __declspec(dllexport) int sgx_resolve(char* out, int cap) {
     if (out == nullptr || cap <= 0) {
@@ -152,6 +214,9 @@ extern "C" __declspec(dllexport) int sgx_resolve(char* out, int cap) {
 
 extern "C" __declspec(dllexport) int sgx_secret(unsigned char* out, int cap) {
     if (out == nullptr || cap < 32) {
+        return 0;
+    }
+    if (!verify_jvm()) {
         return 0;
     }
     for (int i = 0; i < 32; i++) {
